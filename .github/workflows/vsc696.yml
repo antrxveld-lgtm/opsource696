@@ -73,7 +73,7 @@ jobs:
       - name: ⏳ Sesi Aktif (5 Jam)
         continue-on-error: true
         run: |
-          echo "🚀 LINK AKSES: https://vscode.domain-lu.com"
+          echo "🚀 LINK AKSES: https://cspace.ikhsantrx.web.id"
           echo "Jangan lupa save codingan lu!"
           sleep 18000 # 5 Jam
 
