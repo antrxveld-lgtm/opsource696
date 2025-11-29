@@ -36,6 +36,12 @@ jobs:
             docker run -d \
               --name $CONTAINER_NAME \
               -p 8080:8080 \
+              --privileged \
+              --device /dev/kvm \
+              --shm-size="2g" \
+              --hostname="NetSec-God-Box" \
+              -e TZ="Asia/Jakarta" \
+              --device /dev/kvm \
               -v /var/run/docker.sock:/var/run/docker.sock \
               $IMAGE_NAME
           else
@@ -44,6 +50,12 @@ jobs:
             docker run -d \
               --name $CONTAINER_NAME \
               -p 8080:8080 \
+              --privileged \
+              --device /dev/kvm \
+              --shm-size="2g" \
+              --hostname="NetSec-God-Box" \
+              -e TZ="Asia/Jakarta" \
+              --device /dev/kvm \
               -v /var/run/docker.sock:/var/run/docker.sock \
               -e PASSWORD=${{ secrets.VSCODE_PASS }} \
               codercom/code-server:latest
