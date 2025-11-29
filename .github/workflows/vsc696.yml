@@ -54,12 +54,20 @@ jobs:
             docker exec $CONTAINER_NAME sudo apt-get install -y git nodejs npm curl
           fi
 
-      # 3. Nyalain Tunnel ke Domain Lu
-      - name: Start Cloudflare Tunnel
-        uses: cloudflare/cloudflared-action@v5.0.0
-        with:
-          tunnel_token: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
-          command: tunnel run --url http://localhost:8080 &
+# 3. Install & Start Cloudflare Tunnel (MANUAL MODE)
+      - name: Install & Start Tunnel
+        run: |
+          # A. Download Binary Resmi dari Cloudflare
+          echo "⬇️ Downloading Cloudflared..."
+          curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+          sudo dpkg -i cloudflared.deb
+
+          # B. Jalanin Tunnel (Background Process)
+          echo "🚇 Starting Tunnel..."
+          # Kita pake flag --token langsung biar ga ribet config file
+          cloudflared tunnel run --token ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }} --url http://localhost:8080 > tunnel.log 2>&1 &
+          
+          echo "✅ Tunnel running in background!"
 
       # 4. MULAI SESI (Tahan 5 Jam)
       - name: ⏳ Sesi Aktif (5 Jam)
