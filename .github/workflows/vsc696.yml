@@ -1,99 +1,128 @@
-name: Android Dev Abadi
+name: CI/CD Stealth Loop (SHIFT B - THE SYNC)
 
-on:
-  workflow_dispatch: # Tombol Manual Start
+# Trigger Manual (Atau via API dari Mandor)
+on: 
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 env:
-  # Ganti 'username-lu' jadi username GitHub lu (HURUF KECIL SEMUA)
-  # Contoh: ghcr.io/ujang/android-dev-space:latest
-  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/android-dev-space:latest
-  CONTAINER_NAME: vscode-runner
+  # KITA PAKE SATU IMAGE PUSAT (PUNYA AKUN A / CIMS969)
+  # Jadi data Akun A dan B bakal SELALU SINKRON dalam satu image ini.
+  CENTRAL_IMAGE: ghcr.io/cims969/my-stealth-env:latest
 
 jobs:
-  start-coding:
+  infinite-hustle:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write # IZIN PUSH IMAGE (WAJIB)
-
     steps:
-      # 1. Login ke Gudang Image
-      - name: Login GHCR
-        uses: docker/login-action@v3
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      # 1. LOGIN PAKE IDENTITAS AKUN A (IMPERSONATE) 🕵️‍♂️
+      # Kita login ke registry pake Username & Token Akun A
+      # Biar bisa PUSH balik ke sana nanti.
+      - name: Login to Central Registry (As cims969)
+        uses: docker/login-action@v2
         with:
           registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          username: cims969  # <--- USERNAME AKUN UTAMA (JANGAN DIGANTI JADI AKUN B)
+          password: ${{ secrets.TOKEN_DARI_AKUN_A }} # <--- TOKEN SAKTI DARI SECRET
 
-      # 2. Cek Save Data (Load Game)
-      - name: Load Save Data
+      # 2. PULL OTAK TERAKHIR DARI PUSAT
+      - name: Pull Central Brain
+        continue-on-error: true
+        run: docker pull $CENTRAL_IMAGE || echo "Image belum ada? Kita mulai dari nol."
+
+      # 3. INITIALIZE ENVIRONMENT (RUMAH UTAMA)
+      - name: Initialize Environment
         run: |
-          # Cek apakah image save-an udah ada?
-          if docker manifest inspect $IMAGE_NAME > /dev/null; then
-            echo "✅ SAVE DATA DITEMUKAN! Loading container..."
-            docker pull $IMAGE_NAME
-            # Run container dari save terakhir
-            docker run -d \
-              --name $CONTAINER_NAME \
-              -p 8080:8080 \
-              --privileged \
-              --device /dev/kvm \
-              --shm-size="2g" \
-              --hostname="NetSec-God-Box" \
-              -e TZ="Asia/Jakarta" \
-              --device /dev/kvm \
-              -v /var/run/docker.sock:/var/run/docker.sock \
-              $IMAGE_NAME
+          echo ">>> MENJALANKAN CONTAINER DARI IMAGE PUSAT... <<<"
+          
+          # Logic: Kalo image ada, pake itu. Kalo gak ada, pake default code-server.
+          if docker image inspect $CENTRAL_IMAGE > /dev/null 2>&1; then
+             TARGET=$CENTRAL_IMAGE
+             echo ">>> LOAD BACKUP SUKSES <<<"
           else
-            echo "🆕 SAVE DATA KOSONG. Memulai New Game..."
-            # Run container baru (Code-Server Polos)
-            docker run -d \
-              --name $CONTAINER_NAME \
-              -p 8080:8080 \
-              --privileged \
-              --device /dev/kvm \
-              --shm-size="2g" \
-              --hostname="NetSec-God-Box" \
-              -e TZ="Asia/Jakarta" \
-              --device /dev/kvm \
-              -v /var/run/docker.sock:/var/run/docker.sock \
-              -e PASSWORD=${{ secrets.VSCODE_PASS }} \
-              codercom/code-server:latest
-            
-            # Install tools dasar (Git & Nodejs) biar gak kosongan
-            echo "Install tools dasar..."
-            docker exec $CONTAINER_NAME sudo apt-get update
-            docker exec $CONTAINER_NAME sudo apt-get install -y git nodejs npm curl
+             TARGET="lscr.io/linuxserver/code-server:latest"
+             echo ">>> FRESH START (BACKUP NOT FOUND) <<<"
           fi
 
-# 3. Install & Start Cloudflare Tunnel (MANUAL MODE)
-      - name: Install & Start Tunnel
-        run: |
-          # A. Download Binary Resmi dari Cloudflare
-          echo "⬇️ Downloading Cloudflared..."
-          curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
-          sudo dpkg -i cloudflared.deb
+          # Jalanin VS Code (Host Container)
+          docker run -d \
+            --name npm-dependency-check \
+            --privileged \
+            --network host \
+            -e PUID=0 -e PGID=0 \
+            -e PASSWORD=kopisetarbak \
+            -e TZ=Asia/Jakarta \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v ${{ github.workspace }}:/config/workspace \
+            $TARGET
 
-          # B. Jalanin Tunnel (Background Process)
-          echo "🚇 Starting Tunnel..."
-          # Kita pake flag --token langsung biar ga ribet config file
-          cloudflared tunnel run --token ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }} --url http://localhost:8080 > tunnel.log 2>&1 &
+      # 4. AUTO-START PANEL (HEROKU KW - NODE.JS) 🚀
+      # Container Anak khusus buat jalanin Panel
+      - name: Auto-Start Panel Service
+        run: |
+          echo ">>> MENYALAKAN PANEL MANAGER... <<<"
           
-          echo "✅ Tunnel running in background!"
+          # A. Install Docker CLI di container induk
+          docker exec npm-dependency-check bash -c "apt-get update && apt-get install -y docker.io"
 
-      # 4. MULAI SESI (Tahan 5 Jam)
-      - name: ⏳ Sesi Aktif (5 Jam)
-        continue-on-error: true
-        run: |
-          echo "🚀 LINK AKSES: https://cspace.ikhsantrx.web.id"
-          echo "Jangan lupa save codingan lu!"
-          sleep 18000 # 5 Jam
+          # B. Bersihkan container panel lama
+          docker exec npm-dependency-check bash -c "docker rm -f my-hosting-panel || true"
+          
+          # C. JALANKAN CONTAINER PANEL (Node.js)
+          # Mount folder 'panel' dari repo Akun B ke dalam container
+          docker exec npm-dependency-check bash -c "docker run -d \
+            --name my-hosting-panel \
+            --network host \
+            --restart unless-stopped \
+            -v ${{ github.workspace }}/panel:/app \
+            -w /app \
+            node:lts-alpine \
+            /bin/sh -c 'npm install && npm start'"
+            
+          echo ">>> PANEL NODE.JS BERJALAN DI PORT 3000 <<<"
 
-      # 5. AUTO SAVE (Sebelum Mati)
-      - name: 💾 SAVE GAME (Commit & Push)
-        if: always() # Jalan terus walau timeout/cancel
+      # 5. INJECT TUNNEL (CLOUDFLARE)
+      # Pake Token yang SAMA biar domain gak berubah
+      - name: Inject Network Bridge
+        env:
+          TUNNEL_TOKEN: ${{ secrets.CF_TOKEN }}
         run: |
-          echo "Menyimpan progress..."
-          docker commit $CONTAINER_NAME $IMAGE_NAME
-          docker push $IMAGE_NAME
-          echo "✅ Progress tersimpan di GHCR!"
+          docker exec npm-dependency-check bash -c "curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb && dpkg -i cloudflared.deb"
+          docker exec npm-dependency-check bash -c "mv /usr/bin/cloudflared /usr/bin/sys-integrity-check"
+          docker exec -d npm-dependency-check bash -c "sys-integrity-check tunnel run --token $TUNNEL_TOKEN > /dev/null 2>&1 &"
+
+      # 6. KEEP ALIVE LOOP (5 JAM 50 MENIT)
+      - name: System Monitoring Loop
+        run: |
+          echo ">>> ENVIRONMENT READY (SHIFT B) <<<"
+          echo "VS Code: Port 8443"
+          echo "Panel Web: Port 3000"
+          
+          # 21000 detik = 5 Jam 50 Menit
+          END=$((SECONDS+21000))
+          while [ $SECONDS -lt $END ]; do
+            echo "[INFO] Shift B Working... $(date)"
+            sleep 60
+          done
+
+      # 7. SAVE STATE & SYNC BACK TO ACCOUNT A 💾
+      # Ini bagian paling mahal. Kita setor balik ke Akun A.
+      - name: Commit & Push to Central
+        if: always() # Jalanin mau error atau sukses
+        run: |
+          echo ">>> SAVING STATE TO CIMS969 REPO... <<<"
+          
+          # Matikan panel biar bersih
+          docker exec npm-dependency-check bash -c "docker stop my-hosting-panel" || true
+          
+          # Commit Container jadi Image
+          docker commit npm-dependency-check $CENTRAL_IMAGE
+          
+          # PUSH KE AKUN A (Karena kita login pake Token Akun A di step 1)
+          docker push $CENTRAL_IMAGE
+          
+          echo ">>> SYNCHRONIZATION COMPLETE. AKUN A SIAP LANJUTIN. <<<"
