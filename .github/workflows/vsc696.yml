@@ -16,8 +16,12 @@ jobs:
   infinite-hustle:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
+      - name: Checkout Code (AMBIL DARI REPO CIMS969)
         uses: actions/checkout@v3
+        with:
+          repository: cims969/gabut  # <--- Ganti 'cims969/gabut' sesuai username/repo asli Akun A
+          token: ${{ secrets.TOKEN_DARI_AKUN_A }} # <--- Pake token yang tadi kita buat biar resmi
+          ref: main # Atau 'master', cek branch utama lu apa
 
       # 1. LOGIN PAKE IDENTITAS AKUN A (IMPERSONATE) 🕵️‍♂️
       # Kita login ke registry pake Username & Token Akun A
