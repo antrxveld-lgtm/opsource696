@@ -1,132 +1,67 @@
-name: CI/CD Stealth Loop (SHIFT B - THE SYNC)
+name: Deploy Terminal DinD
 
-# Trigger Manual (Atau via API dari Mandor)
-on: 
+on:
   workflow_dispatch:
-
-permissions:
-  contents: read
+  push:
+    branches: [main]
 
 env:
-  # KITA PAKE SATU IMAGE PUSAT (PUNYA AKUN A / CIMS969)
-  # Jadi data Akun A dan B bakal SELALU SINKRON dalam satu image ini.
-  CENTRAL_IMAGE: ghcr.io/cims969/my-stealth-env:latest
+  IMAGE_NAME: terminal-workspace
 
 jobs:
-  infinite-hustle:
+  deploy:
     runs-on: ubuntu-latest
+    
     steps:
-      - name: Checkout Code (AMBIL DARI REPO CIMS969)
+      - name: Checkout
         uses: actions/checkout@v3
-        with:
-          repository: cims969/gabut  # <--- Ganti 'cims969/gabut' sesuai username/repo asli Akun A
-          token: ${{ secrets.TOKEN_DARI_AKUN_A }} # <--- Pake token yang tadi kita buat biar resmi
-          ref: main # Atau 'master', cek branch utama lu apa
-
-      # 1. LOGIN PAKE IDENTITAS AKUN A (IMPERSONATE) 🕵️‍♂️
-      # Kita login ke registry pake Username & Token Akun A
-      # Biar bisa PUSH balik ke sana nanti.
-      - name: Login to Central Registry (As cims969)
+      
+      - name: Login to GHCR
         uses: docker/login-action@v2
         with:
           registry: ghcr.io
-          username: cims969  # <--- USERNAME AKUN UTAMA (JANGAN DIGANTI JADI AKUN B)
-          password: ${{ secrets.TOKEN_DARI_AKUN_A }} # <--- TOKEN SAKTI DARI SECRET
-
-      # 2. PULL OTAK TERAKHIR DARI PUSAT
-      - name: Pull Central Brain
-        continue-on-error: true
-        run: docker pull $CENTRAL_IMAGE || echo "Image belum ada? Kita mulai dari nol."
-
-      # 3. INITIALIZE ENVIRONMENT (RUMAH UTAMA)
-      - name: Initialize Environment
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Pull or Build Image
         run: |
-          echo ">>> MENJALANKAN CONTAINER DARI IMAGE PUSAT... <<<"
-          
-          # Logic: Kalo image ada, pake itu. Kalo gak ada, pake default code-server.
-          if docker image inspect $CENTRAL_IMAGE > /dev/null 2>&1; then
-             TARGET=$CENTRAL_IMAGE
-             echo ">>> LOAD BACKUP SUKSES <<<"
-          else
-             TARGET="lscr.io/linuxserver/code-server:latest"
-             echo ">>> FRESH START (BACKUP NOT FOUND) <<<"
+          if ! docker pull ghcr.io/${{ github.actor }}/${{ env.IMAGE_NAME }}:latest 2>/dev/null; then
+            cat > Dockerfile <<'EOF'
+          FROM docker:24-dind
+          RUN apk add --no-cache bash nodejs npm git curl wget && \
+              wget -q https://github.com/tsl0922/ttyd/releases/download/1.7.4/ttyd.x86_64 -O /usr/bin/ttyd && \
+              chmod +x /usr/bin/ttyd
+          WORKDIR /workspace
+          EXPOSE 7681 3000
+          CMD ["sh", "-c", "dockerd-entrypoint.sh & sleep 5 && ttyd -p 7681 -W bash"]
+          EOF
+            docker build -t ghcr.io/${{ github.actor }}/${{ env.IMAGE_NAME }}:latest .
+            docker push ghcr.io/${{ github.actor }}/${{ env.IMAGE_NAME }}:latest
           fi
-
-          # Jalanin VS Code (Host Container)
-          docker run -d \
-            --name npm-dependency-check \
-            --privileged \
-            --network host \
-            -e PUID=0 -e PGID=0 \
-            -e PASSWORD=kopisetarbak \
-            -e TZ=Asia/Jakarta \
-            -v /var/run/docker.sock:/var/run/docker.sock \
-            -v ${{ github.workspace }}:/config/workspace \
-            $TARGET
-
-      # 4. AUTO-START PANEL (HEROKU KW - NODE.JS) 🚀
-      # Container Anak khusus buat jalanin Panel
-      - name: Auto-Start Panel Service
+      
+      - name: Run Container
         run: |
-          echo ">>> MENYALAKAN PANEL MANAGER... <<<"
-          
-          # A. Install Docker CLI di container induk
-          docker exec npm-dependency-check bash -c "apt-get update && apt-get install -y docker.io"
-
-          # B. Bersihkan container panel lama
-          docker exec npm-dependency-check bash -c "docker rm -f my-hosting-panel || true"
-          
-          # C. JALANKAN CONTAINER PANEL (Node.js)
-          # Mount folder 'panel' dari repo Akun B ke dalam container
-          docker exec npm-dependency-check bash -c "docker run -d \
-            --name my-hosting-panel \
-            --network host \
-            --restart unless-stopped \
-            -v ${{ github.workspace }}/panel:/app \
-            -w /app \
-            node:lts-alpine \
-            /bin/sh -c 'npm install && npm start'"
-            
-          echo ">>> PANEL NODE.JS BERJALAN DI PORT 3000 <<<"
-
-      # 5. INJECT TUNNEL (CLOUDFLARE)
-      # Pake Token yang SAMA biar domain gak berubah
-      - name: Inject Network Bridge
-        env:
-          TUNNEL_TOKEN: ${{ secrets.CF_TOKEN }}
+          docker run -d --privileged \
+            --name workspace \
+            -p 7681:7681 \
+            -p 3000:3000 \
+            ghcr.io/${{ github.actor }}/${{ env.IMAGE_NAME }}:latest
+      
+      - name: Setup Cloudflare Tunnel
         run: |
-          docker exec npm-dependency-check bash -c "curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb && dpkg -i cloudflared.deb"
-          docker exec npm-dependency-check bash -c "mv /usr/bin/cloudflared /usr/bin/sys-integrity-check"
-          docker exec -d npm-dependency-check bash -c "sys-integrity-check tunnel run --token $TUNNEL_TOKEN > /dev/null 2>&1 &"
-
-      # 6. KEEP ALIVE LOOP (5 JAM 50 MENIT)
-      - name: System Monitoring Loop
+          docker run -d --network host cloudflare/cloudflared:latest tunnel \
+            --no-autoupdate run \
+            --token ${{ secrets.CF_TOKEN }}
+      
+      - name: Wait and Auto-Save
         run: |
-          echo ">>> ENVIRONMENT READY (SHIFT B) <<<"
-          echo "VS Code: Port 8443"
-          echo "Panel Web: Port 3000"
+          echo "Terminal: term.ikhsantrx.web.id"
+          echo "Panel: panel.ikhsantrx.web.id"
+          sleep 19800
           
-          # 21000 detik = 5 Jam 50 Menit
-          END=$((SECONDS+21000))
-          while [ $SECONDS -lt $END ]; do
-            echo "[INFO] Shift B Working... $(date)"
-            sleep 60
-          done
-
-      # 7. SAVE STATE & SYNC BACK TO ACCOUNT A 💾
-      # Ini bagian paling mahal. Kita setor balik ke Akun A.
-      - name: Commit & Push to Central
-        if: always() # Jalanin mau error atau sukses
-        run: |
-          echo ">>> SAVING STATE TO CIMS969 REPO... <<<"
+          docker commit workspace ghcr.io/${{ github.actor }}/${{ env.IMAGE_NAME }}:backup-$(date +%Y%m%d-%H%M%S)
+          docker commit workspace ghcr.io/${{ github.actor }}/${{ env.IMAGE_NAME }}:latest
+          docker push ghcr.io/${{ github.actor }}/${{ env.IMAGE_NAME }}:backup-$(date +%Y%m%d-%H%M%S)
+          docker push ghcr.io/${{ github.actor }}/${{ env.IMAGE_NAME }}:latest
           
-          # Matikan panel biar bersih
-          docker exec npm-dependency-check bash -c "docker stop my-hosting-panel" || true
-          
-          # Commit Container jadi Image
-          docker commit npm-dependency-check $CENTRAL_IMAGE
-          
-          # PUSH KE AKUN A (Karena kita login pake Token Akun A di step 1)
-          docker push $CENTRAL_IMAGE
-          
-          echo ">>> SYNCHRONIZATION COMPLETE. AKUN A SIAP LANJUTIN. <<<"
+          echo "Backup saved!"
